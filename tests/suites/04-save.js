@@ -56,18 +56,32 @@ module.exports = {
           `gal.sec has ${s.gal.sec.length} slots for ${game.GLV.length} Ops`);
       },
 
+    /* Driven through the real vault screen — export to the clipboard, wipe the
+       roster, then import — rather than replaying a copy of the guard. */
     'importing a save grants GUTPUNCH even after both unlockables are earned':
-      ({ fresh, ok }) => {
-        const { game } = fresh();
-        game.SAVE.ach.horde5 = 1;      // CPL. PUNISHMENT
-        game.SAVE.ach.galall = 1;      // DEAD-EYE DOTTIE
-        game.syncChars();              // CHARS.length is now 6
-        game.SAVE.own.gutpunch = 1;
-        // the vault-import guard, verbatim from index.html
-        if (game.SAVE.own.gutpunch && game.CHARS.length < 5) game.applyShop('gutpunch');
+      async ({ fresh, ok }) => {
+        const { game, HOST } = fresh();
+        game.SAVE.own.gutpunch = 1;                 // bought for 100 gold
+        game.SAVE.ach.horde5 = 1;                   // CPL. PUNISHMENT
+        game.SAVE.ach.galall = 1;                   // DEAD-EYE DOTTIE
+
+        game.setState('vault');
+        game.keys.act = 1; game.PK = {}; game.update(); game.keys.act = 0;   // X: export
+        await Promise.resolve();
+        ok(HOST.clipboard.startsWith('MHMD1.'), 'export did not reach the clipboard');
+
+        game.syncChars();                           // both unlockables folded in -> CHARS.length 6
+        ok(game.CHARS.length >= 6, 'expected 6 operatives, got ' + game.CHARS.length);
+        const i = game.CHARS.indexOf(game.GUTPUNCH);
+        if (i >= 0) game.CHARS.splice(i, 1);        // simulate a fresh device
+
+        game.setState('vault');
+        game.keys.inv = 1; game.PK = {}; game.update(); game.keys.inv = 0;   // Y: import
+        await new Promise((r) => setImmediate(r));  // let the clipboard promise settle
+
         ok(game.CHARS.includes(game.GUTPUNCH),
-          'owned GUTPUNCH was dropped on import: the `CHARS.length < 5` guard is false ' +
-          'once the two unlockables are folded in (applyShop already guards itself)');
+          'owned GUTPUNCH was dropped on import — the roster came back without the ' +
+          'character the player paid for');
       },
 
     'lifetime counters never go NaN through a bank + migrate cycle':

@@ -173,6 +173,8 @@ const HOST = {
   ctxStats,
   audioLog,
   errors: [],
+  logs: [],
+  clipboard: '',
   get audioTime() { return audioTime; },
   set audioTime(v) { audioTime = v; },
 
@@ -258,7 +260,10 @@ const G = {
     maxTouchPoints: 0,
     getGamepads: () => [],
     userAgent: 'mhmd-harness',
-    clipboard: { writeText: () => Promise.resolve() },
+    clipboard: {
+      writeText: (s) => { HOST.clipboard = String(s); return Promise.resolve(); },
+      readText: () => Promise.resolve(HOST.clipboard || ''),
+    },
     // deliberately no requestMIDIAccess: exercises the graceful-degradation path
   },
   location: { href: 'file:///index.html', search: '', hash: '' },
@@ -273,7 +278,13 @@ const G = {
   setTimeout: (fn, ms) => { timeouts.push({ fn, ms: ms || 0 }); return timeouts.length; },
   clearTimeout: () => {},
   performance: { now: () => nowMs },
-  console,
+  // the game logs debug reports and error traces; keep them out of the test
+  // output unless asked, but always record them so suites can assert on them
+  console: Object.assign(Object.create(console), {
+    log: (...a) => { HOST.logs.push(a.join(' ')); if (process.env.MHMD_VERBOSE) console.log(...a); },
+    warn: (...a) => { HOST.logs.push(a.join(' ')); if (process.env.MHMD_VERBOSE) console.warn(...a); },
+    error: (...a) => { HOST.logs.push(a.join(' ')); if (process.env.MHMD_VERBOSE) console.error(...a); },
+  }),
   AudioContext: FakeAC,
   webkitAudioContext: FakeAC,
   Math, Date, JSON, Object, Array, String, Number, Boolean, Error, Map, Set, WeakSet, WeakMap,

@@ -37,27 +37,29 @@ const api = {
   },
 };
 
-for (const f of files) {
-  const suite = require(path.join(dir, f));
-  const name = suite.name || f.replace(/\.js$/, '');
-  console.log('\n• ' + name);
-  for (const [label, fn] of Object.entries(suite.tests)) {
-    if (label.startsWith('SKIP ')) { skipped++; console.log('    - ' + label); continue; }
-    try {
-      fn(api);
-      pass++; console.log('    ✓ ' + label);
-    } catch (e) {
-      fail++; failures.push([name, label, e]);
-      console.log('    ✗ ' + label);
-      console.log('      ' + String(e.message).split('\n').join('\n      '));
+(async () => {
+  for (const f of files) {
+    const suite = require(path.join(dir, f));
+    const name = suite.name || f.replace(/\.js$/, '');
+    console.log('\n• ' + name);
+    for (const [label, fn] of Object.entries(suite.tests)) {
+      if (label.startsWith('SKIP ')) { skipped++; console.log('    - ' + label); continue; }
+      try {
+        await fn(api);
+        pass++; console.log('    ✓ ' + label);
+      } catch (e) {
+        fail++; failures.push([name, label, e]);
+        console.log('    ✗ ' + label);
+        console.log('      ' + String(e.message).split('\n').join('\n      '));
+      }
     }
   }
-}
 
-console.log('\n' + '-'.repeat(58));
-console.log(`  ${pass} passed, ${fail} failed${skipped ? ', ' + skipped + ' skipped' : ''}`);
-if (fail) {
-  console.log('\n  FAILING:');
-  for (const [s, l] of failures) console.log('    ' + s + ' → ' + l);
-}
-process.exit(Math.min(fail, 250));
+  console.log('\n' + '-'.repeat(58));
+  console.log(`  ${pass} passed, ${fail} failed${skipped ? ', ' + skipped + ' skipped' : ''}`);
+  if (fail) {
+    console.log('\n  FAILING:');
+    for (const [s, l] of failures) console.log('    ' + s + ' → ' + l);
+  }
+  process.exit(Math.min(fail, 250));
+})();

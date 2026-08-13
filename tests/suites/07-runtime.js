@@ -74,21 +74,58 @@ module.exports = {
       ok(bad.length === 0, bad.join('\n        '));
     },
 
-    'no mode ever exits into a state it did not come from': ({ fresh, ok }) => {
-      const { game, HOST } = fresh();
-      unlockAll(game);
-      const rnd = makeRng(44);
-      const bad = [];
-      for (let op = 0; op < game.GLV.length; op++) {
-        game.galMode = 1; game.galResetLvl(op);
-        sweep(game, HOST, 4000, rnd, true);
-        // legal exits from an Op: still in it, its win/lose screens, pause, or the menu
-        const legal = ['gal', 'galwin', 'galover', 'pause', 'menu', 'galsel'];
-        if (!legal.includes(game.state))
-          bad.push(`op${op} leaked into "${game.state}" (P=${game.P === null ? 'null' : 'obj'})`);
-      }
-      ok(bad.length === 0, bad.join('\n        '));
-    },
+    /* The invariant that actually matters, checked on EVERY frame rather than
+       by looking at where the fuzzer happened to wander: the campaign must
+       never be running without a player. Judging by final state can't tell a
+       leak apart from the fuzzer legitimately walking the menus into another
+       mode, so it has to be sampled continuously. */
+    'the campaign never runs without a player, however you got there':
+      ({ fresh, ok }) => {
+        const { game, HOST } = fresh();
+        unlockAll(game);
+        const rnd = makeRng(44);
+        const bad = [];
+        const check = (where) => {
+          if (game.state === 'play' && !game.P) bad.push(where + ': state=play with P=null');
+        };
+        for (let op = 0; op < game.GLV.length; op++) {
+          game.galMode = 1; game.galResetLvl(op);
+          for (let i = 0; i < 4000 && !bad.length; i++) {
+            const KEYS2 = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' ', 'z', 'enter', 'c', 'v', 'p'];
+            if (rnd() < 0.3) HOST.dispatch(rnd() < 0.5 ? 'keydown' : 'keyup', { key: KEYS2[(rnd() * 10) | 0] });
+            const pid = 1 + ((rnd() * 3) | 0);
+            if (rnd() < 0.35) HOST.tapCanvas(rnd() * 256, rnd() * 224, { pointerId: pid });
+            if (rnd() < 0.30) HOST.releaseCanvas(rnd() * 256, rnd() * 224, { pointerId: pid });
+            game.update(); check(`op${op} frame ${i} (after update)`);
+            game.render();
+          }
+        }
+        ok(bad.length === 0, bad.slice(0, 5).join('\n        '));
+      },
+
+    'pausing in any mode and un-pausing returns to that same mode':
+      ({ fresh, ok }) => {
+        const { game } = fresh();
+        unlockAll(game);
+        const bad = [];
+        const enter = {
+          gal: () => { game.galMode = 1; game.galResetLvl(0); },
+          horde: () => game.startHorde(),
+          play: () => { game.startLevel(0); game.state = 'play'; },
+        };
+        for (const [mode, go] of Object.entries(enter)) {
+          for (const exit of ['key', 'tapOffMenu', 'resumeRow']) {
+            go();
+            game.keys.pause = 1; game.PK = {}; game.update(); game.keys.pause = 0; game.PK = {};
+            if (game.state !== 'pause') { bad.push(`${mode}: could not pause`); continue; }
+            if (exit === 'key') { game.keys.jump = 1; game.update(); game.keys.jump = 0; }
+            if (exit === 'tapOffMenu') { game.tap = { x: 128, y: 210 }; game.update(); }
+            if (exit === 'resumeRow') { game.tap = { x: 128, y: 58 }; game.update(); }
+            if (game.state !== mode) bad.push(`${mode} + ${exit} → ${game.state}`);
+          }
+        }
+        ok(bad.length === 0, bad.join('\n        '));
+      },
 
     'frontend states render without a player object': ({ fresh, notThrows }) => {
       const { game } = fresh();

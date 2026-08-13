@@ -48,18 +48,35 @@ module.exports = {
           'frame after leaving pause crashed on a null P');
       },
 
-    'the touch pads are restored whenever the rail shooter is left':
+    /* The pads are hidden for the whole of an Op (the rail shooter owns every
+       touch) and must come back the moment we are anywhere else — otherwise the
+       player is left on a phone with no controls at all. */
+    'the touch pads track the mode: hidden inside an Op, visible outside it':
       ({ fresh, ok }) => {
-        const { game, HOST } = fresh();
-        enterAlly(game);
-        pauseNow(game);
-        game.tap = { ...OFF_MENU_TAP };
-        game.update();
-        const hidden = ['dp', 'bA', 'bB', 'bX', 'bY', 'bP']
-          .filter((id) => HOST.elements.get(id).style.display === 'none');
-        ok(hidden.length === 0,
-          'still hidden after leaving the rail shooter: ' + hidden.join(',') +
-          ' — on touch the player has no controls at all');
+        const PADS = ['dp', 'bA', 'bB', 'bX', 'bY', 'bP'];
+        const hiddenNow = (HOST) => PADS.filter((id) => HOST.elements.get(id).style.display === 'none');
+
+        // resuming out of pause keeps us in the Op, so they stay hidden
+        {
+          const { game, HOST } = fresh();
+          enterAlly(game);
+          pauseNow(game);
+          game.tap = { ...OFF_MENU_TAP };
+          game.update();
+          ok(game.state === 'gal', 'expected to resume into the Op, got ' + game.state);
+          ok(hiddenNow(HOST).length === PADS.length, 'pads should stay hidden while in an Op');
+        }
+        // quitting to the menu must give them back
+        {
+          const { game, HOST } = fresh();
+          enterAlly(game);
+          pauseNow(game);
+          game.pauseSel = game.PAUSE_ITEMS.findIndex((p) => p.k === 'quit');
+          game.keys.fire = 1; game.PK = {}; game.update();
+          ok(game.state === 'menu', 'expected the menu, got ' + game.state);
+          const still = hiddenNow(HOST);
+          ok(still.length === 0, 'still hidden after quitting to the menu: ' + still.join(','));
+        }
       },
 
     'RESUME row honours pauseRet (control case — this one is already right)':

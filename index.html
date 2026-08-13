@@ -1355,7 +1355,7 @@ let state='splash', tick=0, stateT=0, score=0, lives=3, cam=0, shake=0;
 let P=null, bullets=[], ebul=[], enemies=[], pickups=[], parts=[], decals=[], boss=null, spawnQ=[];
 let line='', lineT=0, bossIntroT=0, winT=0, overT=0;
 let menuSel=0, charSel=0, introScene=0, introT=0, introRev=0, navT=0;
-const VER='0.37-ALPHA';
+const VER='0.40-ALPHA';
 const opt={music:-1, vol:7, sfxv:8, diff:1, gore:0, crt:1, shake:1, flash:1};
 (function loadOpt(){
   try{ const o=JSON.parse(localStorage.getItem('mhmd_opt'));
@@ -1522,7 +1522,7 @@ function galResetLvl(lv){
   galGold=0; galThreats=[]; galFx=[]; galBoss=null; galBanner='';
   galBanT=0; galDuck=false; galShotQ=[]; galWeapon='PISTOL'; galAmmo=0;
   galSecrets=0; galStage=0; galShake=0; galSecN=GLV[lv].secN||0; galInv=0;
-  gal2P=(galMode===2); galTransit=0;
+  gal2P=(galMode===2); galTransit=0; stopT=0;        // hitstop must not survive ze mode change
   parts=[]; decals=[]; galBossDelay=0; galBanQ=null; galBanQT=0; galPtrs={};
   galBan(GLV[lv].name,140);
   setState('gal');
@@ -1575,7 +1575,7 @@ function galKill(th,px,py){
 }
 function galAimAt(sx,sy,wpn){
   const WD=GALWPN[wpn||galWeapon], R=WD.rad;
-  const pad=R>0?R:(R<0?R:2);
+  const pad=R>0?R:2;                                 // never negative: that shrinks ze hitbox
   const list=galThreats.slice().sort((a,b2)=>
     ((b2.kind==='captor')-(a.kind==='captor'))*1e6 + ((b2.y+b2.h)-(a.y+a.h)));
   for(const th of list){                             // pass 1: under ze reticle
@@ -1685,7 +1685,7 @@ function galUpdate(){
       galClip=GALWPN[galWeapon].clip;
       if(galWeapon!=='PISTOL'){
         galAmmo-=GALWPN[galWeapon].clip;
-        if(galAmmo<=0){ galWeapon='PISTOL'; galClip=6; galBan('BACK TO ZE TRUSTY PISTOL',60); }
+        if(galAmmo<=0){ galWeapon='PISTOL'; galClip=6; galBan('BACK TO THE TRUSTY PISTOL',60); }
       }
       blip(500,800,0.06,'square',0.08);
     }
@@ -1799,7 +1799,7 @@ function galContinue(){                             // resume at ze last checkpo
   galPadUI(true);
   const sc=galCur();
   if(sc&&sc.wpn){ galWeapon=sc.wpn; galClip=GALWPN[sc.wpn].clip; galAmmo=999; }
-  galBan('CHECKPOINT '+(galCheck+1)+' \u00b7 BACK IN ZE FIGHT',120);
+  galBan('CHECKPOINT '+(galCheck+1)+' \u00b7 BACK IN THE FIGHT',120);
   setState('gal');
 }
 function galLevelDone(){
@@ -1897,7 +1897,7 @@ function galBossUpdate(){
     if(b.trans===0){
       if(b.stage===2){ b.hp=b.max=70; b.y=44; }
       else { b.hp=b.max=45; b.x=W/2-10; b.y=70; }
-      galBan(b.stage===2?'STAGE 2: ZE SKELETAL FRAME':'FINAL STAGE: ZE BRAIN ITSELF',120);
+      galBan(b.stage===2?'STAGE 2: THE SKELETAL FRAME':'FINAL STAGE: THE BRAIN ITSELF',120);
     }
     return;
   }
@@ -2216,26 +2216,39 @@ function hBank(wc){
   hNewIx=SAVE.hboard.indexOf(ent);
   saveSave();
 }
-function hCollect(pk){
-  pk.dead=1;
-  if(pk.kind==='heart'){ if(P.hp<P.maxhp)P.hp++; sfxPick(); }
-  if(pk.kind==='gold'){ hGold++; score+=500; blip(700,1100,0.06,'square',0.08); }
+/* Ze pickups that behave identically in every mode. Campaign and arena used to
+   keep private copies of this and had already drifted apart; anything that is
+   genuinely mode-specific (gold, 1-ups, hostages) stays with its caller.
+   Returns true if ze pickup was handled here.                              */
+function applyPickup(pk){
   if(pk.kind==='shield'){
     if(P.armor<=0){ P.armor=2; sfxPick(); showLine('BODY ARMOR: +2 PLATES'); }
-    else if(INV.shield<1){ INV.shield=1; sfxPick(); showLine('SPARE ARMOR STASHED (X)'); }
+    else if(INV.shield<1){ INV.shield=1; sfxPick(); showLine('SPARE ARMOR STASHED (X TO USE)'); }
     else { score+=300; blip(700,1100,0.06,'square',0.08); }
+    return true;
   }
   if(pk.kind==='invinc'){
     P.star=300; sfxPick(); showLine('STAR-SPANGLED INVINCIBILITY!');
     if(!devMode){ SAVE.stars=(SAVE.stars|0)+1; if(SAVE.stars>=5)grant('star5'); }
+    return true;
   }
-  if(pk.kind==='dmg'){ P.rage=900; sfxPick(); showLine('DAMAGE BOOST: GO CRUSH THEM!'); }
+  if(pk.kind==='dmg'){ P.rage=900; sfxPick(); showLine('DAMAGE BOOST: GO CRUSH THEM!'); return true; }
   if(pk.kind==='gren'){
     const cap=CHARS[charSel].stat.gren?9:6;
     INV.gren=Math.min(cap,INV.gren+3);
     sfxPick(); showLine('GRENADES +3 (X TO THROW)');
+    return true;
   }
-  if(pk.kind==='wpn'){ P.weapon=pk.wp; sfxPick(); showLine('GOT: '+WPN[pk.wp].name); }
+  if(pk.kind==='wpn'){ P.weapon=pk.wp; sfxPick(); showLine('GOT: '+WPN[pk.wp].name); return true; }
+  return false;
+}
+function hCollect(pk){
+  pk.dead=1;
+  if(applyPickup(pk))return;
+  // arena-only: no banner on a heal (ze wave banners own that line), gold is
+  // counted for ze run rather than ze vault
+  if(pk.kind==='heart'){ P.hp=Math.min(P.maxhp,P.hp+1); sfxPick(); }
+  if(pk.kind==='gold'){ hGold++; score+=500; blip(700,1100,0.06,'square',0.08); }
 }
 function hBoom(b){
   const R=b.big?36:26, D=(b.big?6:4)+(P&&P.rage>0?2:0);
@@ -2584,8 +2597,11 @@ const PAUSE_ITEMS=[
  {k:'debug',  l:()=>'COPY DEBUG REPORT'},
  {k:'restart',l:()=>'RESTART SECTOR'},
  {k:'quit',   l:()=>'QUIT TO MENU'}];
+// ze ONE way back into ze game from ze pause screen. Every exit goes through
+// here, so none of them can forget which mode ze player actually came from.
+function pauseResume(){ setState(pauseRet); sfxMenu(); }
 function pauseAct(k,d){
-  if(k==='resume'){ setState(pauseRet); sfxMenu(); }
+  if(k==='resume'){ pauseResume(); }
   if(k==='vol'){ opt.vol=Math.max(0,Math.min(10,opt.vol+(d||1))); setVol(); sfxMenu(); }
   if(k==='music'){
     const opts=[-1]; for(let i=0;i<3;i++)if(unlocked[i])opts.push(i);
@@ -2664,17 +2680,25 @@ function buyShop(it){
   SAVE.gold-=it.p; SAVE.own[it.id]=1; saveSave();
   applyShop(it.id); sfxPick(); showLine(it.n+' ACQUIRED!');
 }
+// Slot counts come from ze content tables, never from a magic number — adding a
+// sector or an Op must not silently orphan its scores.
+// NOTE ze try/catch: SAVE is built here, ~600 lines before LEVELS is declared,
+// so reading it eagerly is a temporal-dead-zone crash at file load. The floors
+// below are the historical sizes, so an early call still returns a valid save.
+const SLOTS_LVL=()=>{ try{ return Math.max(12,LEVELS.length); }catch(e){ return 12; } };
+const SLOTS_GAL=()=>{ try{ return Math.max(4,GLV.length); }catch(e){ return 4; } };
+function galSlots(a){ return Array.from({length:SLOTS_GAL()},(z,i)=>(Array.isArray(a)&&a[i])|0); }
 function fixSave(s){
   return {gold:s.gold|0, lifeGold:s.lifeGold|0,
-    best:Array.from({length:12},(z,i)=>(s.best&&s.best[i])|0),
+    best:Array.from({length:SLOTS_LVL()},(z,i)=>(s.best&&s.best[i])|0),
     kills:s.kills|0, deaths:s.deaths|0, wins:s.wins|0,
     prog:s.prog|0, crush:s.crush|0, nadeK:s.nadeK|0, stars:s.stars|0, plates:s.plates|0,
     tele:Array.isArray(s.tele)?s.tele.slice(-200):[],
     hboard:Array.isArray(s.hboard)?s.hboard.slice(0,5):[],
     mechs:(s.mechs&&typeof s.mechs==='object')?s.mechs:{},
-    gal:(s.gal&&typeof s.gal==='object')?{prog:s.gal.prog|0,
-      best:Array.isArray(s.gal.best)?s.gal.best.slice(0,4):[0,0,0,0],
-      sec:Array.isArray(s.gal.sec)?s.gal.sec.slice(0,4):[0,0,0,0]}:{prog:0,best:[0,0,0,0],sec:[0,0,0,0]},
+    gal:(s.gal&&typeof s.gal==='object')
+      ?{prog:s.gal.prog|0, best:galSlots(s.gal.best), sec:galSlots(s.gal.sec)}
+      :{prog:0, best:galSlots(null), sec:galSlots(null)},
     ach:s.ach||{}, own:s.own||{}};
 }
 function loadSave(){
@@ -2706,7 +2730,7 @@ const ACH=[
  {id:'foolme', n:'FOOL ME ONCE',         d:'ATTEMPT TO BUY THE BATTLE PASS'},
  {id:'horde5', n:'LAST PATRIOT STANDING', d:'SURVIVE THE 15-WAVE GAUNTLET + THE MECH'},
  {id:'gal1',    n:'RANGE CERTIFIED',    d:'CLEAR OP 1'},
- {id:'galall',  n:'ZE SHOOTING ALLY',   d:'CLEAR ALL FOUR OPS'},
+ {id:'galall',  n:'THE SHOOTING ALLY',  d:'CLEAR ALL FOUR OPS'},
  {id:'galhost', n:'COUSIN INSURANCE',   d:'SAVE THE HOSTAGE'},
  {id:'galsec',  n:'BEACHCOMBER',        d:'ALL LOBSTERS IN ONE OP'},
  {id:'galclean',n:'TRIGGER DISCIPLINE', d:'AN OP, NO CIVILIANS HIT'},
@@ -3017,8 +3041,8 @@ function updateFrontend(){
     const rep=navT>22 && navT%9===0;
     if(edge('up')  ||(rep&&keys.up))  { menuSel=(menuSel+MENU.length-1)%MENU.length; sfxMenu(); }
     if(edge('down')||(rep&&keys.down)){ menuSel=(menuSel+1)%MENU.length; sfxMenu(); }
-    if(edge('l')) menuAct(menuSel,-1);
-    if(edge('r')){ const m2=MENU[menuSel]; if(m2.adj)m2.adj(1); }  // d-pad adjusts, never enters
+    if(edge('l')){ const m1=MENU[menuSel]; if(m1.adj)m1.adj(-1); } // d-pad adjusts, never enters
+    if(edge('r')){ const m2=MENU[menuSel]; if(m2.adj)m2.adj(1); }  // (both directions, always)
     if(edge('fire')||edge('start')||edge('jump')) menuAct(menuSel,1);
     if(tap){ // tappable rows
       const i=Math.floor((tap.y-86)/12);
@@ -3107,7 +3131,7 @@ function updateFrontend(){
           if(!s||!s.startsWith('MHMD1.')){ showLine('NO VALID SAVE ON CLIPBOARD'); return; }
           const v=JSON.parse(atob(s.slice(6)));
           Object.assign(SAVE,fixSave(v)); saveSave();
-          if(SAVE.own.gutpunch&&CHARS.length<5)applyShop('gutpunch');
+          if(SAVE.own.gutpunch)applyShop('gutpunch');   // applyShop already guards for duplicates
           if(SAVE.own.skin)applyShop('skin');
           showLine('SAVE IMPORTED. WELCOME BACK.'); sfxPick();
         },()=>showLine('CLIPBOARD READ BLOCKED'));
@@ -3119,17 +3143,17 @@ function updateFrontend(){
     return;
   }
   if(state==='pause'){
-    if(edge('pause')||edge('jump')||edge('start')){ setState(pauseRet); sfxMenu(); return; }
+    if(edge('pause')||edge('jump')||edge('start')){ pauseResume(); return; }
     if(edge('up'))  { pauseSel=(pauseSel+PAUSE_ITEMS.length-1)%PAUSE_ITEMS.length; sfxMenu(); }
     if(edge('down')){ pauseSel=(pauseSel+1)%PAUSE_ITEMS.length; sfxMenu(); }
-    if(edge('l'))pauseAct(PAUSE_ITEMS[pauseSel].k,-1);
+    if(edge('l')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,-1);
     else if(edge('r')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,1);
     else if(edge('fire'))pauseAct(PAUSE_ITEMS[pauseSel].k,1);
     if(tap){
       const i=Math.floor((tap.y-56)/13);
       if(i>=0&&i<PAUSE_ITEMS.length){
         if(i===pauseSel)pauseAct(PAUSE_ITEMS[i].k,1); else {pauseSel=i;sfxMenu();}
-      } else { setState('play'); sfxMenu(); }
+      } else { pauseResume(); }                      // tap off ze menu = un-pause, same mode
       tap=null;
     }
     if(lineT>0)lineT--;
@@ -3141,7 +3165,7 @@ function updateFrontend(){
     if(edge('up'))  { lvlSel=(lvlSel+items.length-1)%items.length; sfxMenu(); }
     if(edge('down')){ lvlSel=(lvlSel+1)%items.length; sfxMenu(); }
     if(lvlSel>=items.length)lvlSel=items.length-1;
-    if(edge('l'))lvlAct(items[lvlSel],-1);
+    if(edge('l')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],-1);
     else if(edge('r')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],1);
     else if(edge('fire')||edge('start'))lvlAct(items[lvlSel],1);
     if(tap){
@@ -3179,8 +3203,7 @@ function updateFrontend(){
     return;
   }
   if(state==='post'){
-    stateT++;
-    if(stateT>40 && (edge('fire')||edge('start')||tap)){
+    if(stateT>40 && (edge('fire')||edge('start')||tap)){   // stateT already ticked at ze top
       tap=null; postShot++; stateT=0;
       if(postShot>3){ postShot=0; setState('credits'); }
     }
@@ -3929,24 +3952,10 @@ function spawnEnemies(){
 }
 function collectPickup(pk){
   pk.dead=1;
-  if(pk.kind==='wpn'){ P.weapon=pk.wp; sfxPick(); showLine('GOT: '+WPN[pk.wp].name); }
+  if(applyPickup(pk))return;
+  // campaign-only: lives, ze hostage rescue, and gold that banks to ze vault
   if(pk.kind==='heart'){ P.hp=Math.min(P.maxhp,P.hp+1); sfxPick(); showLine('FREEDOM FRIES: +1 HP'); }
   if(pk.kind==='life'){ lives++; sfxPick(); showLine('EAGLE TOKEN: EXTRA LIFE'); }
-  if(pk.kind==='shield'){
-    if(P.armor<=0){ P.armor=2; sfxPick(); showLine('BODY ARMOR: +2 PLATES'); }
-    else if(INV.shield<1){ INV.shield=1; sfxPick(); showLine('SPARE ARMOR STASHED (X TO USE)'); }
-    else { score+=300; blip(700,1100,0.06,'square',0.08); }
-  }
-  if(pk.kind==='invinc'){
-    P.star=300; sfxPick(); showLine('STAR-SPANGLED INVINCIBILITY!');
-    if(!devMode){ SAVE.stars=(SAVE.stars|0)+1; if(SAVE.stars>=5)grant('star5'); }
-  }
-  if(pk.kind==='dmg'){ P.rage=900; sfxPick(); showLine('DAMAGE BOOST: GO CRUSH THEM!'); }
-  if(pk.kind==='gren'){
-    const cap=CHARS[charSel].stat.gren?9:6;
-    INV.gren=Math.min(cap,INV.gren+3);
-    sfxPick(); showLine('GRENADES +3 (X TO THROW)');
-  }
   if(pk.kind==='gold'){
     score+=500; runGold++;
     blip(700,1100,0.06,'square',0.08);
@@ -4821,6 +4830,10 @@ function update(){
   if(state==='horde'){ hordeUpdate(); PK=Object.assign({},keys); tap=null; return; }
   if(state==='gal'){ galUpdate(); PK=Object.assign({},keys); tap=null; return; }
   if(state!=='play'){ updateFrontend(); PK=Object.assign({},keys); tap=null; return; }
+  if(!P){                                            // ze campaign cannot run without a player.
+    galPadUI(false); setState('menu');               // bounce home instead of throwing every frame
+    PK=Object.assign({},keys); tap=null; return;
+  }
   if(edge('pause')||edge('start')){
     pauseRet='play'; setState('pause'); pauseSel=0; sfxMenu();
     PK=Object.assign({},keys); tap=null; return;
@@ -6829,6 +6842,7 @@ function render(){
     if(opt.crt)cx.drawImage(crtCv,0,0);
     return;
   }
+  if(!P){ cx.restore(); return; }                    // no player = nothing campaign-shaped to draw
   drawBG();
   drawSigns();
   drawGaps();
