@@ -4874,6 +4874,37 @@ Y:'101101010010010',Z:'111001010100111',
 '\u2191':'010111010010010','\u2193':'010010010111010',
 '\u2190':'010110111110010','\u2192':'010011111011010',
 '\u2588':'111111111111111','\u2591':'101010101010101'};
+/* ---- ze glyph atlas ----------------------------------------------------
+   Ze 3x5 font used to be painted one fillRect per lit pixel: up to 15 draw
+   calls per character, which on ze main menu came to over 1,500 per frame and
+   made render ~40x more expensive than ze whole update loop. Each (colour,
+   scale) pair is now baked once into an offscreen strip and blitted one image
+   per character - ze same trick makeSpr() already uses for sprites, so no new
+   assets and no new dependencies.
+   Ze cache stabilises at ze ~29 palette colours actually used; ze bound is
+   only paranoia in case a future caller passes a computed colour.        */
+const FONTKEYS=Object.keys(FONT);
+const FONTIX={}; FONTKEYS.forEach((k,i)=>{ FONTIX[k]=i; });
+const fontAtlas=new Map();
+function fontSheet(col,sc){
+  const key=col+'|'+sc;
+  const hit=fontAtlas.get(key);
+  if(hit)return hit;
+  if(fontAtlas.size>128)fontAtlas.clear();
+  const gw=3*sc, gh=5*sc;
+  const a=document.createElement('canvas');
+  a.width=gw*FONTKEYS.length; a.height=gh;
+  const g=a.getContext('2d');
+  g.imageSmoothingEnabled=false;
+  g.fillStyle=col;
+  for(let i=0;i<FONTKEYS.length;i++){
+    const bits=FONT[FONTKEYS[i]];
+    for(let r=0;r<5;r++)for(let c2=0;c2<3;c2++)
+      if(bits[r*3+c2]==='1')g.fillRect(i*gw+c2*sc,r*sc,sc,sc);
+  }
+  fontAtlas.set(key,a);
+  return a;
+}
 function txt(t,x,y,c,size,align){
   t=String(t).toUpperCase().replace(/\u00dc/g,'U');
   const sz=size||8;
@@ -4882,12 +4913,15 @@ function txt(t,x,y,c,size,align){
   x=Math.round(x); y=Math.round(y)-5*sc;
   if(align==='center')x-=Math.round(w/2);
   if(align==='right')x-=w;
-  cx.fillStyle=c||'#f8f8f8';
+  const col=c||'#f8f8f8';
+  cx.fillStyle=col;                                  // callers may lean on this
+  const sheet=fontSheet(col,sc), gw=3*sc, gh=5*sc;
   for(let i=0;i<t.length;i++){
-    const g=FONT[t[i]];
-    if(!g)continue;
-    for(let r=0;r<5;r++)for(let col=0;col<3;col++)
-      if(g[r*3+col]==='1')cx.fillRect(x+i*cw+col*sc,y+r*sc,sc,sc);
+    const ch=t[i];
+    if(ch===' ')continue;                            // ze blank glyph draws nothing
+    const ix=FONTIX[ch];
+    if(ix===undefined)continue;
+    cx.drawImage(sheet,ix*gw,0,gw,gh,x+i*cw,y,gw,gh);
   }
 }
 function drawBG(){
@@ -5293,21 +5327,39 @@ function drawBGTrain(){
     cx.lineTo(wx+Math.cos(wa)*7,H-8+Math.sin(wa)*7); cx.stroke();
   }
 }
-function drawSky(){
-  // dithered night sky, Genesis-style banding
-  const bands=['#0c0618','#150a26','#1e0e34','#2a1240','#331641','#3a1838'];
-  const bh=[26,26,26,30,40,44];
+/* Ze Genesis-style dithered sky never changes, but it was being stippled one
+   1x1 fillRect at a time - 1,280 draw calls every frame, ze single most
+   expensive thing in ze whole renderer. Bake it once, blit it after. Same
+   trick as buildCRT() below. Ze stars still scroll and ze moon still sits on
+   top of them, so both stay live.                                         */
+const SKYBANDS=['#0c0618','#150a26','#1e0e34','#2a1240','#331641','#3a1838'];
+const SKYBH=[26,26,26,30,40,44];
+function paintSkyBands(g){                           // shared by ze bake and ze tests
   let by=0;
-  for(let i=0;i<bands.length;i++){
-    rect(0,by,W,bh[i],bands[i]);
-    if(i<bands.length-1){
-      cx.fillStyle=bands[i+1];
-      for(let x=(by%2);x<W;x+=2)cx.fillRect(x,by+bh[i]-1,1,1);
-      cx.fillStyle=bands[i];
-      for(let x=((by+1)%2);x<W;x+=2)cx.fillRect(x,by+bh[i],1,1);
+  for(let i=0;i<SKYBANDS.length;i++){
+    g.fillStyle=SKYBANDS[i]; g.fillRect(0,by,W,SKYBH[i]);
+    if(i<SKYBANDS.length-1){
+      g.fillStyle=SKYBANDS[i+1];
+      for(let x=(by%2);x<W;x+=2)g.fillRect(x,by+SKYBH[i]-1,1,1);
+      g.fillStyle=SKYBANDS[i];
+      for(let x=((by+1)%2);x<W;x+=2)g.fillRect(x,by+SKYBH[i],1,1);
     }
-    by+=bh[i];
+    by+=SKYBH[i];
   }
+  return by;
+}
+let skyCv=null;
+function skySheet(){
+  if(skyCv)return skyCv;
+  skyCv=document.createElement('canvas');
+  skyCv.width=W; skyCv.height=GY;
+  const g=skyCv.getContext('2d');
+  g.imageSmoothingEnabled=false;
+  paintSkyBands(g);
+  return skyCv;
+}
+function drawSky(){
+  cx.drawImage(skySheet(),0,0);
   cx.fillStyle='#c8c8e8';
   for(let i=0;i<34;i++){
     const sx=(i*97 - cam*0.08)%W, sy=(i*53)%58;

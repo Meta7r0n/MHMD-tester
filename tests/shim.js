@@ -30,7 +30,7 @@ function mkListenerHost(label) {
 }
 
 // ---- Canvas 2D: no-op draw surface that still records call counts
-const ctxStats = { calls: 0, byMethod: Object.create(null) };
+const ctxStats = { calls: 0, byMethod: Object.create(null), record: null };
 function makeCtx(canvas) {
   const real = {
     canvas,
@@ -50,6 +50,9 @@ function makeCtx(canvas) {
       return (...a) => {
         ctxStats.calls++;
         ctxStats.byMethod[k] = (ctxStats.byMethod[k] || 0) + 1;
+        // ctxStats.record is opt-in: suites set it to an array to capture the
+        // exact draw calls (used to prove the glyph atlas is pixel-equivalent)
+        if (ctxStats.record) ctxStats.record.push([k, t.canvas === undefined ? null : t.canvas, ...a]);
         return undefined;
       };
     },
