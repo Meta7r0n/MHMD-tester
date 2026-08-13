@@ -73,6 +73,42 @@ module.exports = {
         ok(leaked.length === 0, 'LEFT activated sub-list rows: ' + leaked.join(', '));
       },
 
+    /* feSubList() is the one screen handler whose return value steers the
+       dispatcher. A bare `return;` inside it reads as "not handled" and lets
+       the frame fall through to every later screen. */
+    'the sub-list handler reports whether it owned the frame': ({ fresh, ok }) => {
+      const SUBSTATES = ['optmenu', 'depot', 'merch', 'sound', 'hboard', 'galsel'];
+      const bad = [];
+      for (const st of SUBSTATES) {
+        // plain frame
+        {
+          const { game } = fresh();
+          game.SAVE.gal = { prog: 3, best: [0, 0, 0, 0], sec: [0, 0, 0, 0] };
+          game.state = st; game.stateT = 1; game.subSel = 0; game.PK = {};
+          if (game.feSubList() !== true) bad.push(st + ' (idle frame) returned falsy');
+        }
+        // the early-exit paths must report handled too
+        {
+          const { game } = fresh();
+          game.SAVE.gal = { prog: 3, best: [0, 0, 0, 0], sec: [0, 0, 0, 0] };
+          game.state = st; game.stateT = 1; game.subSel = 0;
+          game.keys.jump = 1; game.PK = {};
+          if (game.feSubList() !== true) bad.push(st + ' (B-to-back) returned falsy');
+        }
+      }
+      {
+        const { game } = fresh();
+        game.state = 'merch'; game.stateT = 30; game.merchMani = 1; game.PK = {};
+        if (game.feSubList() !== true) bad.push('merch (battle-pass gag) returned falsy');
+      }
+      for (const st of ['menu', 'play', 'gal', 'horde', 'splash']) {
+        const { game } = fresh();
+        game.state = st; game.PK = {};
+        if (game.feSubList() !== false) bad.push(st + ' is not a sub-list but claimed the frame');
+      }
+      ok(bad.length === 0, bad.join('\n        '));
+    },
+
     'the "post" screen advances stateT exactly once per frame': ({ fresh, eq }) => {
       const { game } = fresh();
       game.setState('post');

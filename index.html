@@ -2976,276 +2976,299 @@ function menuAct(i,dir){
 }
 
 /* ------------------------- MENUS / CUTSCENE UPDATE ------------------------- */
+/* Per-screen frontend updates. updateFrontend() is now just ze dispatcher; each
+   screen owns its own function, so a fix to one cannot leak into ze others -
+   which is exactly how ze d-pad leak survived in three screens but not ze fourth. */
 function updateFrontend(){
   stateT++;
-  if(state==='splash'){
-    if(edge('fire') || edge('start') || tap){
-      tap=null; setState('intro'); introScene=0; introT=0; introRev=0;
-    }
-    return;
+  if(state==='splash'){ feSplash(); return; }
+  if(state==='intro'){ feIntro(); return; }
+  if(state==='menu'){ feMenu(); return; }
+  if(feSubList())return;
+  if(state==='credits'){ feCredits(); return; }
+  if(state==='charsel'){ feCharsel(); return; }
+  if(state==='ach'){ feAch(); return; }
+  if(state==='vault'){ feVault(); return; }
+  if(state==='pause'){ fePause(); return; }
+  if(state==='lvlsel'){ feLvlSel(); return; }
+  if(state==='shop'){ feShop(); return; }
+  if(state==='lvlwin'){ feLvlWin(); return; }
+  if(state==='post'){ fePost(); return; }
+  if(state==='galwin'||state==='galover'){ feGalEnd(); return; }
+  if(state==='hwin'||state==='hover'){ feHordeEnd(); return; }
+  if(state==='over'){ feOver(); return; }
+  if(state==='win'){ feWin(); return; }
+}
+function feSplash(){
+  if(edge('fire') || edge('start') || tap){
+    tap=null; setState('intro'); introScene=0; introT=0; introRev=0;
   }
-  if(state==='intro'){
-    introT++;
-    // sci-fi teletype tick as each character prints
-    const total=INTRO[introScene].lines.join('').length;
-    const rev=Math.min(total,Math.floor(introT/1.6));
-    if(rev>introRev){
-      if(rev%2===0)blip(420+Math.random()*260,340,0.012,'triangle',0.012);
-      introRev=rev;
-    }
-    if(edge('fire')||edge('start')||tap){
-      tap=null; introScene++; introT=0; introRev=0;
-      if(introScene>=INTRO.length) setState('menu');
-    }
-    return;
+  return;
+}
+function feIntro(){
+  introT++;
+  // sci-fi teletype tick as each character prints
+  const total=INTRO[introScene].lines.join('').length;
+  const rev=Math.min(total,Math.floor(introT/1.6));
+  if(rev>introRev){
+    if(rev%2===0)blip(420+Math.random()*260,340,0.012,'triangle',0.012);
+    introRev=rev;
   }
-  if(state==='menu'){
-    if(cheatMode){
-      for(const kc of [['up','U'],['down','D'],['l','L'],['r','R']])
-        if(edge(kc[0])&&cheatBuf.length<6){ cheatBuf+=kc[1]; sfxMenu(); }
-      if(cheatBuf.length>=6){
-        const hit=CHEATS.findIndex(c=>c.seq===cheatBuf);
-        if(hit<0){ sfxHurt(); showLine('INVALID CODE'); }
-        else{
-          const c=CHEATS[hit];
-          if(c.type==='song'){
-            if(unlocked[c.v]){ sfxMenu(); showLine('ALREADY UNLOCKED'); }
-            else { unlocked[c.v]=true; sfxPick(); showLine(SONGS[c.v].name+' UNLOCKED!'); }
-          }
-          if(c.type==='warp'){
-            if(c.v>=LEVELS.length){ sfxHurt(); showLine('SECTOR '+(c.v+1)+' IS STILL IN THE SHOP'); }
-            else if(startLVL===c.v){ startLVL=0; sfxMenu(); showLine('WARP DISARMED'); }
-            else { startLVL=c.v; sfxPick(); showLine('WARP ARMED: SECTOR '+(c.v+1)); }
-          }
-          if(c.type==='wpn'){ superArmed=true; sfxPick();
-            showLine('LIBERTY BELL 9000 ARMED. IT TOLLS FOR THEM.'); }
-          if(c.type==='midi'){
-            midiMode=!midiMode;
-            if(midiMode){ initMIDI(); sfxPick(); }
-            else { sfxMenu(); showLine('MIDI MODE OFF'); }
-          }
-          if(c.type==='dev'){
-            devMode=!devMode;
-            if(devMode){ sfxPick(); showLine('DEV MODE ON. VAULT+ACHIEVEMENTS FROZEN.'); }
-            else { sfxMenu(); showLine('DEV MODE OFF. BACK TO HONEST WORK.'); }
-          }
+  if(edge('fire')||edge('start')||tap){
+    tap=null; introScene++; introT=0; introRev=0;
+    if(introScene>=INTRO.length) setState('menu');
+  }
+  return;
+}
+function feMenu(){
+  if(cheatMode){
+    for(const kc of [['up','U'],['down','D'],['l','L'],['r','R']])
+      if(edge(kc[0])&&cheatBuf.length<6){ cheatBuf+=kc[1]; sfxMenu(); }
+    if(cheatBuf.length>=6){
+      const hit=CHEATS.findIndex(c=>c.seq===cheatBuf);
+      if(hit<0){ sfxHurt(); showLine('INVALID CODE'); }
+      else{
+        const c=CHEATS[hit];
+        if(c.type==='song'){
+          if(unlocked[c.v]){ sfxMenu(); showLine('ALREADY UNLOCKED'); }
+          else { unlocked[c.v]=true; sfxPick(); showLine(SONGS[c.v].name+' UNLOCKED!'); }
         }
-        cheatMode=false; cheatBuf='';
+        if(c.type==='warp'){
+          if(c.v>=LEVELS.length){ sfxHurt(); showLine('SECTOR '+(c.v+1)+' IS STILL IN THE SHOP'); }
+          else if(startLVL===c.v){ startLVL=0; sfxMenu(); showLine('WARP DISARMED'); }
+          else { startLVL=c.v; sfxPick(); showLine('WARP ARMED: SECTOR '+(c.v+1)); }
+        }
+        if(c.type==='wpn'){ superArmed=true; sfxPick();
+          showLine('LIBERTY BELL 9000 ARMED. IT TOLLS FOR THEM.'); }
+        if(c.type==='midi'){
+          midiMode=!midiMode;
+          if(midiMode){ initMIDI(); sfxPick(); }
+          else { sfxMenu(); showLine('MIDI MODE OFF'); }
+        }
+        if(c.type==='dev'){
+          devMode=!devMode;
+          if(devMode){ sfxPick(); showLine('DEV MODE ON. VAULT+ACHIEVEMENTS FROZEN.'); }
+          else { sfxMenu(); showLine('DEV MODE OFF. BACK TO HONEST WORK.'); }
+        }
       }
-      if(edge('fire')||edge('start')){ cheatMode=false; cheatBuf=''; }
-      if(lineT>0)lineT--;
-      return;
+      cheatMode=false; cheatBuf='';
     }
-    if(edge('act')){ cheatMode=true; cheatBuf=''; showLine('D-PAD: ENTER 6-STEP CODE'); }
-    navT=(keys.up||keys.down)?navT+1:0;
-    const rep=navT>22 && navT%9===0;
-    if(edge('up')  ||(rep&&keys.up))  { menuSel=(menuSel+MENU.length-1)%MENU.length; sfxMenu(); }
-    if(edge('down')||(rep&&keys.down)){ menuSel=(menuSel+1)%MENU.length; sfxMenu(); }
-    if(edge('l')){ const m1=MENU[menuSel]; if(m1.adj)m1.adj(-1); } // d-pad adjusts, never enters
-    if(edge('r')){ const m2=MENU[menuSel]; if(m2.adj)m2.adj(1); }  // (both directions, always)
-    if(edge('fire')||edge('start')||edge('jump')) menuAct(menuSel,1);
-    if(tap){ // tappable rows
-      const i=Math.floor((tap.y-86)/12);
-      if(i>=0&&i<MENU.length){ if(i===menuSel)menuAct(i,1); else {menuSel=i;sfxMenu();} }
-      tap=null;
-    }
+    if(edge('fire')||edge('start')){ cheatMode=false; cheatBuf=''; }
     if(lineT>0)lineT--;
     return;
   }
-  { const SUB=subList();
-    if(SUB){
-      if(merchMani){
-        if(stateT>20&&(edge('fire')||edge('jump')||edge('start')||tap)){ tap=null; merchMani=0; }
-        if(lineT>0)lineT--;
-        return;
-      }
-      if(edge('jump')){ merchTry=0; setState('menu'); sfxMenu(); return; }
-      navT=(keys.up||keys.down)?navT+1:0;
-      const rep=navT>22&&navT%9===0;
-      if(edge('up')  ||(rep&&keys.up))  { subSel=(subSel+SUB.length-1)%SUB.length; sfxMenu(); }
-      if(edge('down')||(rep&&keys.down)){ subSel=(subSel+1)%SUB.length; sfxMenu(); }
-      if(subSel>=SUB.length)subSel=SUB.length-1;
-      const it=SUB[subSel];
-      if(edge('l')){ if(it.adj)it.adj(-1); }
-      else if(edge('r')){ if(it.adj)it.adj(1); }     // d-pad adjusts, never enters
-      else if(edge('fire')||edge('start')){ if(it.adj)it.adj(1); else if(it.act)it.act(); }
-      if(tap){
-        const i=Math.floor((tap.y-46)/12);
-        if(i>=0&&i<SUB.length){
-          const t2=SUB[i];
-          if(i===subSel){ if(t2.adj)t2.adj(1); else if(t2.act)t2.act(); }
-          else { subSel=i; sfxMenu(); }
-        } else { setState('menu'); sfxMenu(); }
-        tap=null;
-      }
-      if(lineT>0)lineT--;
-      return;
-    } }
-  if(state==='credits'){
-    if(edge('start')||edge('jump')||tap){ tap=null; setState('menu'); sfxMenu(); return; }
-    if(keys.fire)stateT+=4;                          // hold A: fast-roll
-    if(16+H-stateT*0.5+CRED.length*13 < -10)setState('menu');
-    return;
+  if(edge('act')){ cheatMode=true; cheatBuf=''; showLine('D-PAD: ENTER 6-STEP CODE'); }
+  navT=(keys.up||keys.down)?navT+1:0;
+  const rep=navT>22 && navT%9===0;
+  if(edge('up')  ||(rep&&keys.up))  { menuSel=(menuSel+MENU.length-1)%MENU.length; sfxMenu(); }
+  if(edge('down')||(rep&&keys.down)){ menuSel=(menuSel+1)%MENU.length; sfxMenu(); }
+  if(edge('l')){ const m1=MENU[menuSel]; if(m1.adj)m1.adj(-1); } // d-pad adjusts, never enters
+  if(edge('r')){ const m2=MENU[menuSel]; if(m2.adj)m2.adj(1); }  // (both directions, always)
+  if(edge('fire')||edge('start')||edge('jump')) menuAct(menuSel,1);
+  if(tap){ // tappable rows
+    const i=Math.floor((tap.y-86)/12);
+    if(i>=0&&i<MENU.length){ if(i===menuSel)menuAct(i,1); else {menuSel=i;sfxMenu();} }
+    tap=null;
   }
-  if(state==='charsel'){
-    syncChars();
-    if(charSel>=CHARS.length)charSel=CHARS.length-1;
-    if(edge('l')){ charSel=(charSel+CHARS.length-1)%CHARS.length; sfxMenu(); }
-    if(edge('r')){ charSel=(charSel+1)%CHARS.length; sfxMenu(); }
-    if(edge('fire')||edge('start')||edge('jump')){
+  if(lineT>0)lineT--;
+  return;
+}
+/* Ze shared sub-list screens (options, depot, merch, sound, board, ops).
+   Returns true when it owned ze frame, so ze dispatcher knows to stop. */
+function feSubList(){
+  const SUB=subList();
+  if(!SUB)return false;
+  if(merchMani){
+    if(stateT>20&&(edge('fire')||edge('jump')||edge('start')||tap)){ tap=null; merchMani=0; }
+    if(lineT>0)lineT--;
+    return true;
+  }
+  if(edge('jump')){ merchTry=0; setState('menu'); sfxMenu(); return true; }
+  navT=(keys.up||keys.down)?navT+1:0;
+  const rep=navT>22&&navT%9===0;
+  if(edge('up')  ||(rep&&keys.up))  { subSel=(subSel+SUB.length-1)%SUB.length; sfxMenu(); }
+  if(edge('down')||(rep&&keys.down)){ subSel=(subSel+1)%SUB.length; sfxMenu(); }
+  if(subSel>=SUB.length)subSel=SUB.length-1;
+  const it=SUB[subSel];
+  if(edge('l')){ if(it.adj)it.adj(-1); }
+  else if(edge('r')){ if(it.adj)it.adj(1); }     // d-pad adjusts, never enters
+  else if(edge('fire')||edge('start')){ if(it.adj)it.adj(1); else if(it.act)it.act(); }
+  if(tap){
+    const i=Math.floor((tap.y-46)/12);
+    if(i>=0&&i<SUB.length){
+      const t2=SUB[i];
+      if(i===subSel){ if(t2.adj)t2.adj(1); else if(t2.act)t2.act(); }
+      else { subSel=i; sfxMenu(); }
+    } else { setState('menu'); sfxMenu(); }
+    tap=null;
+  }
+  if(lineT>0)lineT--;
+  return true;
+}
+function feCredits(){
+  if(edge('start')||edge('jump')||tap){ tap=null; setState('menu'); sfxMenu(); return; }
+  if(keys.fire)stateT+=4;                          // hold A: fast-roll
+  if(16+H-stateT*0.5+CRED.length*13 < -10)setState('menu');
+  return;
+}
+function feCharsel(){
+  syncChars();
+  if(charSel>=CHARS.length)charSel=CHARS.length-1;
+  if(edge('l')){ charSel=(charSel+CHARS.length-1)%CHARS.length; sfxMenu(); }
+  if(edge('r')){ charSel=(charSel+1)%CHARS.length; sfxMenu(); }
+  if(edge('fire')||edge('start')||edge('jump')){
+    if(hordeNext)startHorde();
+    else { resetGame(); setState('play'); }
+  }
+  if(tap){
+    const cw2=Math.floor((W-12)/CHARS.length);
+    const i=Math.floor((tap.x-6)/cw2);
+    if(i>=0&&i<CHARS.length){
+      if(i===charSel){
       if(hordeNext)startHorde();
       else { resetGame(); setState('play'); }
     }
-    if(tap){
-      const cw2=Math.floor((W-12)/CHARS.length);
-      const i=Math.floor((tap.x-6)/cw2);
-      if(i>=0&&i<CHARS.length){
-        if(i===charSel){
-        if(hordeNext)startHorde();
-        else { resetGame(); setState('play'); }
-      }
-        else { charSel=i; sfxMenu(); }
-      }
+      else { charSel=i; sfxMenu(); }
+    }
+    tap=null;
+  }
+  return;
+}
+function feAch(){
+  if(edge('fire')||edge('start')||edge('jump')||tap){ tap=null; setState('menu'); }
+  return;
+}
+function feVault(){
+  if(edge('act')){                                 // X: export save
+    try{
+      const s='MHMD1.'+btoa(JSON.stringify(SAVE));
+      console.log(s);
+      navigator.clipboard.writeText(s).then(
+        ()=>showLine('SAVE EXPORTED TO CLIPBOARD'),
+        ()=>showLine('CLIPBOARD BLOCKED - SEE CONSOLE'));
+    }catch(e){ showLine('EXPORT FAILED'); }
+    sfxMenu(); if(lineT>0)lineT--; return;
+  }
+  if(edge('inv')){                                 // Y: import save
+    try{
+      navigator.clipboard.readText().then(s=>{
+        if(!s||!s.startsWith('MHMD1.')){ showLine('NO VALID SAVE ON CLIPBOARD'); return; }
+        const v=JSON.parse(atob(s.slice(6)));
+        Object.assign(SAVE,fixSave(v)); saveSave();
+        if(SAVE.own.gutpunch)applyShop('gutpunch');   // applyShop already guards for duplicates
+        if(SAVE.own.skin)applyShop('skin');
+        showLine('SAVE IMPORTED. WELCOME BACK.'); sfxPick();
+      },()=>showLine('CLIPBOARD READ BLOCKED'));
+    }catch(e){ showLine('IMPORT FAILED'); }
+    if(lineT>0)lineT--; return;
+  }
+  if(edge('fire')||edge('start')||edge('jump')||tap){ tap=null; setState('menu'); }
+  if(lineT>0)lineT--;
+  return;
+}
+function fePause(){
+  if(edge('pause')||edge('jump')||edge('start')){ pauseResume(); return; }
+  if(edge('up'))  { pauseSel=(pauseSel+PAUSE_ITEMS.length-1)%PAUSE_ITEMS.length; sfxMenu(); }
+  if(edge('down')){ pauseSel=(pauseSel+1)%PAUSE_ITEMS.length; sfxMenu(); }
+  if(edge('l')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,-1);
+  else if(edge('r')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,1);
+  else if(edge('fire'))pauseAct(PAUSE_ITEMS[pauseSel].k,1);
+  if(tap){
+    const i=Math.floor((tap.y-56)/13);
+    if(i>=0&&i<PAUSE_ITEMS.length){
+      if(i===pauseSel)pauseAct(PAUSE_ITEMS[i].k,1); else {pauseSel=i;sfxMenu();}
+    } else { pauseResume(); }                      // tap off ze menu = un-pause, same mode
+    tap=null;
+  }
+  if(lineT>0)lineT--;
+  return;
+}
+function feLvlSel(){
+  if(edge('jump')){ setState('menu'); sfxMenu(); return; }
+  const items=lvlItems();
+  if(edge('up'))  { lvlSel=(lvlSel+items.length-1)%items.length; sfxMenu(); }
+  if(edge('down')){ lvlSel=(lvlSel+1)%items.length; sfxMenu(); }
+  if(lvlSel>=items.length)lvlSel=items.length-1;
+  if(edge('l')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],-1);
+  else if(edge('r')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],1);
+  else if(edge('fire')||edge('start'))lvlAct(items[lvlSel],1);
+  if(tap){
+    const i=Math.floor((tap.y-46)/12);
+    if(i>=0&&i<items.length){
+      if(i===lvlSel)lvlAct(items[i],1); else {lvlSel=i;sfxMenu();}
+    } else setState('menu');
+    tap=null;
+  }
+  if(lineT>0)lineT--;
+  return;
+}
+function feShop(){
+  if(edge('jump')){ setState('menu'); sfxMenu(); return; }
+  if(edge('up'))  { shopSel=(shopSel+SHOP.length)%(SHOP.length+1); sfxMenu(); }
+  if(edge('down')){ shopSel=(shopSel+1)%(SHOP.length+1); sfxMenu(); }
+  if(edge('fire')||edge('start')){
+    if(shopSel>=SHOP.length){ setState('menu'); }
+    else buyShop(SHOP[shopSel]);
+  }
+  if(tap){
+    const i=Math.floor((tap.y-56)/22);
+    if(i>=0&&i<SHOP.length){ if(i===shopSel)buyShop(SHOP[i]); else {shopSel=i;sfxMenu();} }
+    else setState('menu');
+    tap=null;
+  }
+  if(lineT>0)lineT--;
+  return;
+}
+function feLvlWin(){
+  winT++;
+  if(winT>50 && (edge('fire')||edge('start')||tap)){
+    tap=null; startLevel(LVL+1,P.weapon); setState('play');
+  }
+  return;
+}
+function fePost(){
+  if(stateT>40 && (edge('fire')||edge('start')||tap)){   // stateT already ticked at ze top
+    tap=null; postShot++; stateT=0;
+    if(postShot>3){ postShot=0; setState('credits'); }
+  }
+  return;
+}
+function feGalEnd(){
+  if(stateT>50){
+    if(edge('fire')||tap){
       tap=null;
-    }
-    return;
+      if(state==='galwin'&&galLvl+1<GLV.length){ galResetLvl(galLvl+1); }
+      else if(state==='galover'){ galContinue(); }
+      else { galPadUI(false); setState('menu'); sfxMenu(); }
+    } else if(edge('jump')||edge('start')){ galPadUI(false); setState('menu'); sfxMenu(); }
   }
-  if(state==='ach'){
-    if(edge('fire')||edge('start')||edge('jump')||tap){ tap=null; setState('menu'); }
-    return;
+  return;
+}
+function feHordeEnd(){
+  if(stateT>50){
+    if(edge('fire')||tap){ tap=null; hordeNext=true; setState('charsel'); sfxPick(); }
+    else if(edge('jump')||edge('start')){ hordeNext=false; setState('menu'); sfxMenu(); }
   }
-  if(state==='vault'){
-    if(edge('act')){                                 // X: export save
-      try{
-        const s='MHMD1.'+btoa(JSON.stringify(SAVE));
-        console.log(s);
-        navigator.clipboard.writeText(s).then(
-          ()=>showLine('SAVE EXPORTED TO CLIPBOARD'),
-          ()=>showLine('CLIPBOARD BLOCKED - SEE CONSOLE'));
-      }catch(e){ showLine('EXPORT FAILED'); }
-      sfxMenu(); if(lineT>0)lineT--; return;
-    }
-    if(edge('inv')){                                 // Y: import save
-      try{
-        navigator.clipboard.readText().then(s=>{
-          if(!s||!s.startsWith('MHMD1.')){ showLine('NO VALID SAVE ON CLIPBOARD'); return; }
-          const v=JSON.parse(atob(s.slice(6)));
-          Object.assign(SAVE,fixSave(v)); saveSave();
-          if(SAVE.own.gutpunch)applyShop('gutpunch');   // applyShop already guards for duplicates
-          if(SAVE.own.skin)applyShop('skin');
-          showLine('SAVE IMPORTED. WELCOME BACK.'); sfxPick();
-        },()=>showLine('CLIPBOARD READ BLOCKED'));
-      }catch(e){ showLine('IMPORT FAILED'); }
-      if(lineT>0)lineT--; return;
-    }
-    if(edge('fire')||edge('start')||edge('jump')||tap){ tap=null; setState('menu'); }
-    if(lineT>0)lineT--;
-    return;
+  return;
+}
+function feOver(){
+  overT++;
+  if(overT>50){
+    if(edge('fire')||edge('start')||tap){       // ze arcade continue
+      tap=null; runPure=false;
+      lives=3+(SAVE.own.canteen?1:0);
+      runDeaths=0;
+      startLevel(LVL); setState('play'); sfxPick();
+    } else if(edge('jump')){ setState('menu'); sfxMenu(); }
   }
-  if(state==='pause'){
-    if(edge('pause')||edge('jump')||edge('start')){ pauseResume(); return; }
-    if(edge('up'))  { pauseSel=(pauseSel+PAUSE_ITEMS.length-1)%PAUSE_ITEMS.length; sfxMenu(); }
-    if(edge('down')){ pauseSel=(pauseSel+1)%PAUSE_ITEMS.length; sfxMenu(); }
-    if(edge('l')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,-1);
-    else if(edge('r')&&PADJ[PAUSE_ITEMS[pauseSel].k])pauseAct(PAUSE_ITEMS[pauseSel].k,1);
-    else if(edge('fire'))pauseAct(PAUSE_ITEMS[pauseSel].k,1);
-    if(tap){
-      const i=Math.floor((tap.y-56)/13);
-      if(i>=0&&i<PAUSE_ITEMS.length){
-        if(i===pauseSel)pauseAct(PAUSE_ITEMS[i].k,1); else {pauseSel=i;sfxMenu();}
-      } else { pauseResume(); }                      // tap off ze menu = un-pause, same mode
-      tap=null;
-    }
-    if(lineT>0)lineT--;
-    return;
+  return;
+}
+function feWin(){
+  winT++;
+  if(winT>50 && (edge('fire')||edge('start')||tap)){
+    tap=null; postShot=0; setState('post');
   }
-  if(state==='lvlsel'){
-    if(edge('jump')){ setState('menu'); sfxMenu(); return; }
-    const items=lvlItems();
-    if(edge('up'))  { lvlSel=(lvlSel+items.length-1)%items.length; sfxMenu(); }
-    if(edge('down')){ lvlSel=(lvlSel+1)%items.length; sfxMenu(); }
-    if(lvlSel>=items.length)lvlSel=items.length-1;
-    if(edge('l')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],-1);
-    else if(edge('r')&&items[lvlSel].kind!=='lvl')lvlAct(items[lvlSel],1);
-    else if(edge('fire')||edge('start'))lvlAct(items[lvlSel],1);
-    if(tap){
-      const i=Math.floor((tap.y-46)/12);
-      if(i>=0&&i<items.length){
-        if(i===lvlSel)lvlAct(items[i],1); else {lvlSel=i;sfxMenu();}
-      } else setState('menu');
-      tap=null;
-    }
-    if(lineT>0)lineT--;
-    return;
-  }
-  if(state==='shop'){
-    if(edge('jump')){ setState('menu'); sfxMenu(); return; }
-    if(edge('up'))  { shopSel=(shopSel+SHOP.length)%(SHOP.length+1); sfxMenu(); }
-    if(edge('down')){ shopSel=(shopSel+1)%(SHOP.length+1); sfxMenu(); }
-    if(edge('fire')||edge('start')){
-      if(shopSel>=SHOP.length){ setState('menu'); }
-      else buyShop(SHOP[shopSel]);
-    }
-    if(tap){
-      const i=Math.floor((tap.y-56)/22);
-      if(i>=0&&i<SHOP.length){ if(i===shopSel)buyShop(SHOP[i]); else {shopSel=i;sfxMenu();} }
-      else setState('menu');
-      tap=null;
-    }
-    if(lineT>0)lineT--;
-    return;
-  }
-  if(state==='lvlwin'){
-    winT++;
-    if(winT>50 && (edge('fire')||edge('start')||tap)){
-      tap=null; startLevel(LVL+1,P.weapon); setState('play');
-    }
-    return;
-  }
-  if(state==='post'){
-    if(stateT>40 && (edge('fire')||edge('start')||tap)){   // stateT already ticked at ze top
-      tap=null; postShot++; stateT=0;
-      if(postShot>3){ postShot=0; setState('credits'); }
-    }
-    return;
-  }
-  if(state==='galwin'||state==='galover'){
-    if(stateT>50){
-      if(edge('fire')||tap){
-        tap=null;
-        if(state==='galwin'&&galLvl+1<GLV.length){ galResetLvl(galLvl+1); }
-        else if(state==='galover'){ galContinue(); }
-        else { galPadUI(false); setState('menu'); sfxMenu(); }
-      } else if(edge('jump')||edge('start')){ galPadUI(false); setState('menu'); sfxMenu(); }
-    }
-    return;
-  }
-  if(state==='hwin'||state==='hover'){
-    if(stateT>50){
-      if(edge('fire')||tap){ tap=null; hordeNext=true; setState('charsel'); sfxPick(); }
-      else if(edge('jump')||edge('start')){ hordeNext=false; setState('menu'); sfxMenu(); }
-    }
-    return;
-  }
-  if(state==='over'){
-    overT++;
-    if(overT>50){
-      if(edge('fire')||edge('start')||tap){       // ze arcade continue
-        tap=null; runPure=false;
-        lives=3+(SAVE.own.canteen?1:0);
-        runDeaths=0;
-        startLevel(LVL); setState('play'); sfxPick();
-      } else if(edge('jump')){ setState('menu'); sfxMenu(); }
-    }
-    return;
-  }
-  if(state==='win'){
-    winT++;
-    if(winT>50 && (edge('fire')||edge('start')||tap)){
-      tap=null; postShot=0; setState('post');
-    }
-    return;
-  }
+  return;
 }
 
 /* ------------------------- GAMEPLAY ------------------------- */
@@ -6895,6 +6918,12 @@ function render(){
     return;
   }
   if(!P){ cx.restore(); return; }                    // no player = nothing campaign-shaped to draw
+  drawPlay();
+  cx.restore();
+}
+/* Ze campaign scene. Split out of render(), which had grown into a state
+   dispatch table with one whole renderer inlined at ze bottom of it.     */
+function drawPlay(){
   drawBG();
   drawSigns();
   drawGaps();
@@ -7255,7 +7284,6 @@ function render(){
     txt('"MOON REICH 2: ELECTRIC BOOGALOO"',W/2,wy+16,'#8878a8',7,'center');
     if(winT>50&&(tick>>4)%2)txt('PRESS FIRE',W/2,wy+30,'#ffe848',7,'center');
   }
-  cx.restore();
 }
 
 /* ------------------------- MAIN LOOP ------------------------- */

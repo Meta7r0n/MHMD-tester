@@ -4,9 +4,11 @@
 **Method:** full read + a headless Node harness (`tests/`) that drives the real code through real
 dispatched events. Every finding below marked **verified** has a reproducing test in `tests/suites/`.
 
-Nothing in `index.html` has been changed. This is the report you asked for before any edits.
-
-**Current status:** `node tests/run.js` → **24 passed, 15 failed**. Every failure is a finding below.
+> **Status — all findings below are now fixed on `claude/c-v0-40-alpha-baseline`.**
+> `node tests/run.js` → **51 passed, 0 failed**. Build is **v0.40-ALPHA**.
+> Left alone by request, still open: `NEWTON'S NEIN`, `SIEG NEIN!`, `ZE FINAL CURTAIN`
+> (see [Open questions](#open-questions-for-you)) and the `index.html` filename question.
+> This document is kept as the record of what was found and why it mattered.
 
 ---
 
@@ -364,14 +366,64 @@ invariant (`pickMech` should never repeat until all six are beaten), and hostage
 
 ---
 
-## Suggested order of work
+---
 
-1. **P0-1** — one line, plus the defensive `P` guard. Unblocks touch playtesting.
-2. **P1-1** — three lines, pattern already established in the sub-list handler.
-3. **P1-2** — decide the version/filename story before the next playtest, not after.
-4. **P2-1 … P2-4** — small and independent; each has a failing test waiting.
-5. **`txt()` glyph atlas** — the one change with a real framerate payoff on a mid-range phone.
-6. Decomposition of `render` / `updateFrontend`, if you want it.
+## What was done
 
-Say the word on which of these you want and I'll implement them — and tell me your calls on the four
-open questions so I can fold them into the same pass.
+Landed on `claude/c-v0-40-alpha-baseline` in three reviewable commits.
+
+**1 · Correctness.** All of P0, P1, P2 and P3 above.
+- Pause now has a single exit, `pauseResume()`, so no path can forget which mode the player came
+  from; `update()` and `render()` refuse to run the campaign without a player.
+- LEFT and RIGHT are symmetric in all four menu screens — both only ever adjust.
+- `VER` → `0.40-ALPHA`.
+- One thing worth flagging: the "derive save slots from the content tables" fix **reproduced
+  archaeology #7** on the first attempt. `SAVE` is built ~600 lines before `LEVELS` is declared, so
+  reading `LEVELS.length` there is a temporal-dead-zone crash at file load. The harness caught it
+  immediately. It now reads through a `try/catch` with the historical sizes as the floor, and the
+  reason is commented at the site.
+
+**2 · Performance.** Two static things were being repainted pixel-by-pixel every frame:
+
+| Scene | canvas calls/frame | render time |
+|---|---|---|
+| Campaign L0 | 2,110 → **480** | 0.552 → **0.328 ms** |
+| Shooting Ally Op 1 | 3,010 → **699** | 0.756 → **0.431 ms** |
+| Horde wave 15 | 2,092 → **979** | 0.802 → **0.675 ms** |
+| Main menu | 3,232 → **585** | — |
+
+`txt()` now blits from a baked glyph atlas (one `drawImage` per character instead of up to 15
+`fillRect`s), and `drawSky()`'s dither banding — 1,280 single-pixel fills per frame, none of which
+ever changed — is baked once. Both follow the existing `makeSpr`/`buildCRT` pattern, so it is still
+one self-contained file with no new assets.
+
+Equivalence was proved rather than assumed: the tests replay the original per-pixel algorithms and
+diff the exact set of painted device pixels against what the baked paths produce, for every glyph at
+every scale and for the whole sky.
+
+**3 · Structure.** `render` 412 → **53 lines** (now purely the state dispatch table it had been
+growing into), with the campaign scene extracted as `drawPlay()`. `updateFrontend` 272 → **20 lines**,
+with one function per screen. Both verified as pure code motion by diffing the statement multiset
+against the previous commit.
+
+That split immediately earned its keep: `feSubList()` is the one handler whose return value steers
+the dispatcher, and its inherited bare `return;` read as "not handled". Harmless today only because
+no later screen matches those states — it would have broken the moment someone added one. Fixed, and
+pinned by a test.
+
+`hordeUpdate`, `updatePlayer` and `updateEnemies` were left alone, as recommended.
+
+**Verification:** 51 tests green, plus 270,000 fuzzed frames across three seeds and targeted
+multitouch sweeps through all four Ops in 1P and 2P, all four sectors, and every horde wave — zero
+runtime errors.
+
+## Where I'd go next
+
+- `drawPlay()` is now the largest function at 362 lines. It splits cleanly by layer
+  (backdrop / actors / FX / HUD) and that would be worth doing as part of the graphics overhaul
+  rather than before it.
+- The remaining per-frame draw cost is concentrated in `drawBGCity` (~399 calls/frame). Its parallax
+  layers are periodic, so the same baking trick applies — bake one period per layer and blit with a
+  wrap offset — but it is worth doing *after* the scenery pass, not before.
+- Coverage gaps called out in `tests/README.md`: MK-II upgrade rules, the `pickMech` rotation
+  invariant, and hostage hit priority.
