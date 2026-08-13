@@ -1426,6 +1426,22 @@ const GALNAME='THE SHOOTING ALLY';                 // gallery -> alley -> ally. 
 // shakeAmp: max shake distance in pixels at ze moment of impact
 const GALFX={ shakeLen:90, shakeAmp:2.2 };
 // ------------------------------------------------------------------
+
+// ---- TUNE ME, LARRY ----------------------------------------------
+// Ze campaign look. Every number here is safe to fiddle with; none of it
+// touches gameplay, only what ze player sees.
+//   shadowAlpha : darkness of ze contact shadow when standing on ze deck
+//   shadowAir   : how high something can be before its shadow fades out (px)
+//   shadowMinW  : narrowest a shadow ever gets, so it never vanishes entirely
+//   partFade    : particle life (frames) below which it starts fading out
+//   partChunk   : particle life above which it draws 3x3 instead of 2x2
+//   lightMin    : smallest burst (particle count) that lights ze scene
+//   lightAmp    : peak brightness of that light, 0..1
+//   lightDecay  : how fast ze light falls off per frame
+const GFX={ shadowAlpha:0.34, shadowAir:46, shadowMinW:3,
+            partFade:12, partChunk:30,
+            lightMin:12, lightAmp:0.13, lightDecay:0.09 };
+// ------------------------------------------------------------------
 let galLvl=0, galScene=0, galT=0, galHP=5, galClip=6, galReload=0,
     galCombo=0, galComboBest=0, galHits=0, galShotsN=0, galScore=0,
     galGold=0, galThreats=[], galFx=[], galBoss=null, galBanner='',
@@ -2581,6 +2597,7 @@ function hordeUpdate(){
   if(tick%20===0)refreshItemBtns();
 }
 let stopT=0, killStreak=0, lastKillT=-9999;
+let lightT=0;                                        // explosion light, 0..1, decays every frame
 let runStats={t0:0,shots:0,hits:0,gold:0};
 function fmtT(fr){ const s=Math.max(0,Math.round(fr/60)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
 let INV={shield:0,gren:0}, invSel=0;
@@ -3893,6 +3910,35 @@ function platPos(pl){
   const t=tick*pl.sp+(pl.ph||0);
   return {x:pl.x+Math.sin(t)*(pl.mx||0), y:pl.y+Math.sin(t)*(pl.my||0)};
 }
+/* Ze surface directly under something, so it can cast a shadow onto whatever it
+   is actually standing over - deck, platform, or ze crate it just jumped on.
+   Returns null over a gap, water or lava, where a shadow would sit on nothing. */
+function surfaceUnder(x,w,feetY){
+  const mid=x+w/2;
+  let best=(overGap(x,w)||inWaterZone(mid)||inLavaZone(mid))?null:GY;
+  for(const pl of PLATS){
+    const pp=platPos(pl);
+    if(x+w>pp.x && x<pp.x+pl.w && pp.y>=feetY-2 && (best===null||pp.y<best))best=pp.y;
+  }
+  return best;
+}
+/* Contact shadow. Metal Slug's trick: at 256x224 a dark smudge under ze feet is
+   what tells you where a thing actually is. Shrinks and fades with altitude. */
+function drawShadow(x,w,feetY){
+  const sy=surfaceUnder(x,w,feetY);
+  if(sy===null)return;
+  const air=sy-feetY;
+  if(air<-2||air>GFX.shadowAir)return;
+  const t=1-Math.max(0,air)/GFX.shadowAir;
+  const sw=Math.max(GFX.shadowMinW,Math.round(w*(0.55+0.4*t)));
+  const sx=Math.round(x+w/2-sw/2-cam);
+  if(sx>W||sx+sw<0)return;
+  cx.globalAlpha=GFX.shadowAlpha*t;
+  cx.fillStyle='#000000';
+  cx.fillRect(sx,Math.round(sy)-1,sw,2);
+  if(sw>5)cx.fillRect(sx+1,Math.round(sy)-2,sw-2,1);
+  cx.globalAlpha=1;
+}
 function platDelta(pl){
   if(!pl.sp)return {x:0,y:0};
   const t1=tick*pl.sp+(pl.ph||0), t0=(tick-1)*pl.sp+(pl.ph||0);
@@ -3940,6 +3986,9 @@ function overGap(x,w){
 }
 function aabb(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
 function burst(x,y,n,col){
+  // every explosion in ze game funnels through here, so this is ze one place
+  // that needs to know a big one should light ze scene for a moment
+  if(n>=GFX.lightMin)lightT=Math.max(lightT,Math.min(1,n/26));
   for(let i=0;i<n;i++) parts.push({x,y,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.7)*4,
     life:20+Math.random()*20,c:col||['#ffe848','#ff7828','#f8f8f8'][i%3]});
 }
@@ -4850,6 +4899,7 @@ function updateBoss(){
 function update(){
   pollPad();
   if(shake>0)shake--; // decay everywhere, incl. game-over screen
+  if(lightT>0)lightT=Math.max(0,lightT-GFX.lightDecay);
   if(state==='horde'){ hordeUpdate(); PK=Object.assign({},keys); tap=null; return; }
   if(state==='gal'){ galUpdate(); PK=Object.assign({},keys); tap=null; return; }
   if(state!=='play'){ updateFrontend(); PK=Object.assign({},keys); tap=null; return; }
@@ -5957,6 +6007,28 @@ function drawCredits(){
   }
   txt('B: SKIP \u00b7 HOLD A: FAST',W/2,H-6,'#2e2440',5,'center');
 }
+/* Ze arena is top-down, so there is no altitude to model - everything sits on
+   ze deck and just needs grounding. One flat blob per body, drawn before ze
+   sorted display list so nothing ends up standing on someone else's shadow. */
+function drawHordeShadows(){
+  cx.globalAlpha=GFX.shadowAlpha*0.8;
+  cx.fillStyle='#000000';
+  const blob=(x,y,w)=>{
+    const sw=Math.max(GFX.shadowMinW,Math.round(w*0.8));
+    const sx=Math.round(x+w/2-sw/2);
+    cx.fillRect(sx,Math.round(y)-1,sw,2);
+    if(sw>5)cx.fillRect(sx+1,Math.round(y)-2,sw-2,1);
+  };
+  for(const pk of hPk)if(!pk.dead)blob(pk.x,pk.y+(pk.h||10),pk.w||10);
+  for(const o of hObs)blob(o.x,o.y+o.h,o.w);
+  // `!(warm>0)` not `warm<=0`: split klones spawn without a warm field at all,
+  // and everywhere else in ze arena an absent warm already means "arrived"
+  for(const e of hEn)if(!e.dead&&!(e.warm>0))blob(e.x,e.y+e.h,e.w);
+  if(hMini&&!(hMini.warm>0))blob(hMini.x,hMini.y+hMini.h,hMini.w);
+  if(hMech&&!(hMech.warm>0))blob(hMech.x,hMech.y+hMech.h,hMech.w);
+  if(P)blob(P.x,P.y+P.h,P.w);
+  cx.globalAlpha=1;
+}
 function drawHorde(){
   rect(0,0,W,H,'#0c0a14');
   cx.save(); cx.translate(-Math.round(hCamX),-Math.round(hCamY));
@@ -5999,6 +6071,7 @@ function drawHorde(){
   rect(HX0-14,HY1,HW,14,'#241e32');    rect(HX0-14,HY1,HW,3,'#3a3050');
   rect(HX0-14,HY0-14,14,HH,'#241e32'); rect(HX0-3,HY0,3,HY1-HY0,'#3a3050');
   rect(HX1,HY0-14,14,HH,'#241e32');    rect(HX1,HY0,3,HY1-HY0,'#3a3050');
+  drawHordeShadows();                                // grounding, under everything
   for(const pk of hPk)drawPickup(pk);
   const dl=[];
   for(const e of hEn)dl.push({y:e.y+e.h,e});
@@ -6929,11 +7002,24 @@ function render(){
 function drawPlay(){
   drawBG();                                          // parallax backdrop
   drawPlayWorld();                                   // decals, platforms, ground props, pickups
+  drawPlayShadows();                                 // contact shadows, under everything alive
   drawPlayActors();                                  // enemies, ze boss, ze player
   drawPlayShots();                                   // bullets, enemy fire, particles
   drawPlayWeather();                                 // lava, updrafts, wind, snow, water
   drawFG();                                          // foreground parallax pillars
+  drawImpactLight();                                 // ze afterglow of something large
   drawPlayHUD();                                     // HUD, dialogue, pause and end cards
+}
+/* A big explosion briefly warms ze whole scene. Drawn over ze foreground so ze
+   pillars catch it too, but under ze HUD so ze numbers stay readable. It is a
+   single decaying pulse rather than a strobe, so REDUCED keeps a softer version
+   instead of losing ze feedback entirely. */
+function drawImpactLight(){
+  if(lightT<=0)return;
+  cx.globalAlpha=GFX.lightAmp*lightT*(opt.flash?1:0.45);
+  cx.fillStyle='#ffd8a0';
+  cx.fillRect(0,0,W,H);
+  cx.globalAlpha=1;
 }
 /* signs, gaps, gore decals, platforms, burning ground, pickups */
 function drawPlayWorld(){
@@ -6960,6 +7046,22 @@ function drawPlayWorld(){
       }
   }
   for(const pk of pickups)drawPickup(pk);
+}
+/* One pass for every contact shadow, after ze platforms are down so shadows can
+   land on them, and before ze actors so nothing stands on top of its own. */
+function drawPlayShadows(){
+  for(const pk of pickups)                           // follow ze bob, so it reads as hovering
+    if(!pk.dead)drawShadow(pk.x,pk.w||8,pk.y+Math.sin(pk.bob)*3+(pk.h||8));
+  for(const e of enemies){
+    if(e.dead)continue;
+    const ex=e.x-cam;
+    if(ex<-40||ex>W+20)continue;
+    if(e.t==='drone'||e.t==='jet')continue;          // fliers cast from too high to read
+    drawShadow(e.x,e.w,e.y+e.h);
+  }
+  if(boss&&!boss.dead&&curL().boss.type!=='mk3')     // ze U-boot is in ze water
+    drawShadow(boss.x,boss.w,boss.y+boss.h);
+  if(P.inv%6<3)drawShadow(P.x,P.w,P.y+P.h);
 }
 /* everything with hit points, drawn enemies -> boss -> player */
 function drawPlayActors(){
@@ -7159,7 +7261,17 @@ function drawPlayShots(){
     const bs=(b.steam||b.hot2||b.hex)?4:3;
     cx.fillRect(Math.round(b.x-cam-1),Math.round(b.y-1),bs,bs);
   }
-  for(const p of parts){cx.fillStyle=p.c;cx.fillRect(Math.round(p.x-cam),Math.round(p.y),2,2);}
+  // Particles used to be a flat 2x2 that popped out of existence. Fresh ones are
+  // now chunkier and ze last few frames fade, so a burst reads as a burst.
+  for(const p of parts){
+    const px=Math.round(p.x-cam);
+    if(px<-4||px>W+4)continue;
+    if(p.life<GFX.partFade)cx.globalAlpha=p.life/GFX.partFade;
+    cx.fillStyle=p.c;
+    const s=p.life>GFX.partChunk?3:2;
+    cx.fillRect(px,Math.round(p.y),s,s);
+    if(p.life<GFX.partFade)cx.globalAlpha=1;
+  }
 }
 /* per-sector environment: lava, updrafts, gusts, blizzard, water */
 function drawPlayWeather(){
