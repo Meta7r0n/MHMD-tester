@@ -1,10 +1,11 @@
-/* The glyph atlas replaced a per-pixel fillRect renderer. These tests prove the
-   replacement paints exactly the same pixels, then guard the win.          */
+/* Both faces blit from a baked atlas rather than painting per pixel. These
+   tests prove what lands on screen is exactly the glyph art in the source —
+   for the 3x5 face against the original per-pixel renderer it replaced, and
+   for the 5x7 face against the picture rows it is authored as.            */
 'use strict';
 
-/* Reference implementation: the ORIGINAL txt(), reduced to the set of lit
-   device pixels it would fill for a given string. */
-function expectedPixels(FONT, t, x, y, size, align) {
+/* the ORIGINAL 3x5 txt(), reduced to the set of lit device pixels */
+function expectedSmall(FONT, t, x, y, size, align) {
   t = String(t).toUpperCase().replace(/Ü/g, 'U');
   const sz = size || 8;
   const sc = sz <= 8 ? 1 : (sz <= 14 ? 2 : (sz <= 22 ? 3 : 4));
@@ -24,31 +25,26 @@ function expectedPixels(FONT, t, x, y, size, align) {
   return px;
 }
 
-/* What the atlas path actually paints: decode each drawImage back through the
-   sheet's glyph layout into device pixels. */
-function actualPixels(game, HOST, t, x, y, size, align) {
+/* decode the blits a face actually made back into device pixels */
+function actual(game, HOST, face, draw, sc) {
   const rec = [];
   HOST.ctxStats.record = rec;
-  game.txt(t, x, y, '#f8f8f8', size, align);
+  draw();
   HOST.ctxStats.record = null;
-
-  const FONT = game.FONT, KEYS = game.FONTKEYS;
-  const sz = size || 8;
-  const sc = sz <= 8 ? 1 : (sz <= 14 ? 2 : (sz <= 22 ? 3 : 4));
-  const gw = 3 * sc, gh = 5 * sc;
+  const gw = face.w * sc, gh = face.h * sc;
   const px = new Set();
   for (const call of rec) {
-    const [method, , sheet, sx, sy, sw, sh, dx, dy, dw, dh] = call;
+    const [method, , , sx, sy, sw, sh, dx, dy, dw, dh] = call;
     if (method !== 'drawImage') continue;
     if (sw !== gw || sh !== gh || dw !== gw || dh !== gh)
       throw new Error(`glyph blit is not 1:1 (src ${sw}x${sh} -> dst ${dw}x${dh})`);
-    if (sy !== 0) throw new Error('sheet is a single row; sy should be 0, got ' + sy);
+    if (sy !== 0) throw new Error('sheet is one row; sy should be 0, got ' + sy);
     const ix = sx / gw;
-    if (!Number.isInteger(ix)) throw new Error('sx ' + sx + ' is not on a glyph boundary');
-    const bits = FONT[KEYS[ix]];
-    if (!bits) throw new Error('glyph index ' + ix + ' is out of range');
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++)
-      if (bits[r * 3 + c] === '1')
+    if (!Number.isInteger(ix)) throw new Error('sx ' + sx + ' is off a glyph boundary');
+    const bits = face.glyphs[face.keys[ix]];
+    if (!bits) throw new Error('glyph index ' + ix + ' out of range');
+    for (let r = 0; r < face.h; r++) for (let c = 0; c < face.w; c++)
+      if (bits[r * face.w + c] === '1')
         for (let yy = 0; yy < sc; yy++) for (let xx = 0; xx < sc; xx++)
           px.add((dx + c * sc + xx) + ',' + (dy + r * sc + yy));
   }
@@ -70,73 +66,132 @@ const SAMPLES = [
 module.exports = {
   name: 'glyph atlas',
   tests: {
-    'paints exactly the pixels the per-pixel renderer did': ({ fresh, ok }) => {
+    '3x5: paints exactly the pixels the per-pixel renderer did': ({ fresh, ok }) => {
       const { game, HOST } = fresh();
       const bad = [];
       for (const [t, x, y, size, align] of SAMPLES) {
-        const want = expectedPixels(game.FONT, t, x, y, size, align);
-        const got = actualPixels(game, HOST, t, x, y, size, align);
+        const sc = (size || 8) <= 8 ? 1 : ((size || 8) <= 14 ? 2 : ((size || 8) <= 22 ? 3 : 4));
+        const want = expectedSmall(game.FONT, t, x, y, size, align);
+        const got = actual(game, HOST, game.FACE_S,
+          () => game.txt(t, x, y, '#f8f8f8', size, align), sc);
         const missing = [...want].filter((p) => !got.has(p));
         const extra = [...got].filter((p) => !want.has(p));
         if (missing.length || extra.length)
-          bad.push(`"${t}" size=${size} align=${align}: ${missing.length} missing, ${extra.length} extra` +
-            (missing.length ? ' e.g. missing ' + missing[0] : '') +
-            (extra.length ? ' e.g. extra ' + extra[0] : ''));
+          bad.push(`"${t}" size=${size}: ${missing.length} missing, ${extra.length} extra`);
       }
       ok(bad.length === 0, bad.join('\n        '));
     },
 
-    'every glyph in the font round-trips through the sheet': ({ fresh, ok }) => {
+    'both faces round-trip every glyph at every scale': ({ fresh, ok }) => {
       const { game, HOST } = fresh();
       const bad = [];
-      for (const ch of game.FONTKEYS) {
-        for (const size of [8, 13, 20, 24]) {
-          const want = expectedPixels(game.FONT, ch, 30, 30, size, undefined);
-          const got = actualPixels(game, HOST, ch, 30, 30, size, undefined);
-          if (want.size !== got.size || [...want].some((p) => !got.has(p)))
-            bad.push(JSON.stringify(ch) + ' @ ' + size);
+      for (const [label, face, drawFn] of [
+        ['3x5', game.FACE_S, (ch, sc) => game.txt(ch, 30, 30, '#f8f8f8', sc === 1 ? 8 : (sc === 2 ? 13 : 20))],
+        ['5x7', game.FACE_L, (ch, sc) => game.txtL(ch, 30, 30, '#f8f8f8', sc)],
+      ]) {
+        for (const ch of face.keys) {
+          for (const sc of [1, 2, 3]) {
+            const got = actual(game, HOST, face, () => drawFn(ch, sc), sc);
+            const bits = face.glyphs[ch];
+            const lit = (bits.match(/1/g) || []).length;
+            if (got.size !== lit * sc * sc)
+              bad.push(`${label} ${JSON.stringify(ch)} @${sc}: ${got.size} px, expected ${lit * sc * sc}`);
+          }
         }
       }
-      ok(bad.length === 0, 'glyphs that do not match: ' + bad.join(', '));
+      ok(bad.length === 0, bad.slice(0, 6).join('\n        '));
+    },
+
+    '5x7 glyphs match the picture rows they are authored as': ({ fresh, ok }) => {
+      const { game, HOST } = fresh();
+      const bad = [];
+      for (const ch of Object.keys(game.FONT_L_ART)) {
+        const art = game.FONT_L_ART[ch];
+        const want = new Set();
+        art.forEach((row, r) => {
+          if (row.length !== 5) bad.push(`${JSON.stringify(ch)} row ${r} is ${row.length} wide, not 5`);
+          [...row].forEach((c, i) => { if (c === '#') want.add((30 + i) + ',' + (30 - 7 + r)); });
+        });
+        if (art.length !== 7) { bad.push(`${JSON.stringify(ch)} is ${art.length} rows, not 7`); continue; }
+        const got = actual(game, HOST, game.FACE_L, () => game.txtL(ch, 30, 30, '#f8f8f8', 1), 1);
+        const missing = [...want].filter((p) => !got.has(p));
+        const extra = [...got].filter((p) => !want.has(p));
+        if (missing.length || extra.length)
+          bad.push(`${JSON.stringify(ch)}: ${missing.length} missing, ${extra.length} extra`);
+      }
+      ok(bad.length === 0, bad.slice(0, 6).join('\n        '));
+    },
+
+    'the two faces cover exactly the same characters': ({ fresh, ok }) => {
+      const { game } = fresh();
+      const s = new Set(game.FACE_S.keys), l = new Set(game.FACE_L.keys);
+      const onlyS = [...s].filter((k) => !l.has(k));
+      const onlyL = [...l].filter((k) => !s.has(k));
+      ok(onlyS.length === 0, 'only in the 3x5 face: ' + JSON.stringify(onlyS));
+      ok(onlyL.length === 0, 'only in the 5x7 face: ' + JSON.stringify(onlyL));
+    },
+
+    'the arrows are unmistakable in the legible face': ({ fresh, ok }) => {
+      const { game } = fresh();
+      // the whole point of the big face: up must not read as down at a glance
+      const g = game.FONT_L;
+      const pairs = [['↑', '↓'], ['←', '→']];
+      for (const [a, b] of pairs) {
+        let diff = 0;
+        for (let i = 0; i < 35; i++) if (g[a][i] !== g[b][i]) diff++;
+        ok(diff >= 10, `${a} and ${b} differ in only ${diff} of 35 pixels`);
+      }
+      // and each arrow must have a solid head: some row fully lit
+      for (const a of ['↑', '↓', '←', '→']) {
+        const rows = game.FONT_L_ART[a];
+        ok(rows.some((r) => r === '#####'), `${a} has no solid head row`);
+      }
     },
 
     'one draw call per visible character, not one per lit pixel': ({ fresh, ok }) => {
       const { game, HOST } = fresh();
       const s = 'MECHA HITLER MUST DIE';
-      HOST.ctxStats.calls = 0;
-      HOST.ctxStats.byMethod = {};
-      game.txt(s, 10, 10, '#f8f8f8', 8);
       const visible = s.replace(/ /g, '').length;
-      const blits = HOST.ctxStats.byMethod.drawImage || 0;
-      const rects = HOST.ctxStats.byMethod.fillRect || 0;
-      ok(blits === visible, `expected ${visible} blits, got ${blits}`);
-      ok(rects === 0, `expected no per-pixel fillRects, got ${rects}`);
+      for (const [label, draw] of [
+        ['3x5', () => game.txt(s, 10, 10, '#f8f8f8', 8)],
+        ['5x7', () => game.txtL(s, 10, 10, '#f8f8f8', 1)],
+      ]) {
+        draw();                                   // warm the sheet: baking it
+        HOST.ctxStats.calls = 0;                  // is itself a burst of fillRects
+        HOST.ctxStats.byMethod = {};
+        draw();
+        ok((HOST.ctxStats.byMethod.drawImage || 0) === visible,
+          `${label}: expected ${visible} blits, got ${HOST.ctxStats.byMethod.drawImage || 0}`);
+        ok((HOST.ctxStats.byMethod.fillRect || 0) === 0,
+          `${label}: expected no per-pixel fillRects`);
+      }
     },
 
-    'the sheet cache is reused across calls and stays bounded': ({ fresh, ok }) => {
+    'each face caches its sheets and stays bounded': ({ fresh, ok }) => {
       const { game } = fresh();
-      const before = game.fontAtlas.size;
-      for (let i = 0; i < 50; i++) game.txt('SAME COLOUR', 10, 10, '#ffe848', 8);
-      ok(game.fontAtlas.size === before + 1,
-        'repeat calls should build one sheet, size went ' + before + ' -> ' + game.fontAtlas.size);
-      for (let i = 0; i < 400; i++) game.txt('X', 0, 0, '#' + (0x100000 + i).toString(16), 8);
-      ok(game.fontAtlas.size <= 129, 'cache grew unbounded: ' + game.fontAtlas.size);
+      for (const [label, face, draw] of [
+        ['3x5', game.FACE_S, (col) => game.txt('SAME', 10, 10, col, 8)],
+        ['5x7', game.FACE_L, (col) => game.txtL('SAME', 10, 10, col, 1)],
+      ]) {
+        const before = face.atlas.size;
+        for (let i = 0; i < 50; i++) draw('#ffe848');
+        ok(face.atlas.size === before + 1,
+          `${label}: repeat calls should build one sheet, ${before} -> ${face.atlas.size}`);
+        for (let i = 0; i < 400; i++) draw('#' + (0x100000 + i).toString(16));
+        ok(face.atlas.size <= 129, `${label}: cache grew unbounded (${face.atlas.size})`);
+      }
     },
 
-    'text rendering cost dropped sharply in the worst-case scene':
-      ({ fresh, ok }) => {
-        const { game, HOST } = fresh();
-        game.setState('menu');
-        for (let i = 0; i < 30; i++) { game.update(); game.render(); }   // warm the cache
-        HOST.ctxStats.calls = 0;
-        const FR = 200;
-        for (let i = 0; i < FR; i++) { game.update(); game.render(); }
-        const perFrame = HOST.ctxStats.calls / FR;
-        // baseline before the atlas + sky bake: ~3,232 canvas calls/frame.
-        // Now ~585. The bound is deliberately loose so ordinary art tweaks do
-        // not trip it — it exists to catch a regression back to per-pixel text.
-        ok(perFrame < 900,
-          `main menu costs ${Math.round(perFrame)} canvas calls/frame (was ~3232, now ~585)`);
-      },
+    'text rendering cost stays far below the pre-atlas baseline': ({ fresh, ok }) => {
+      const { game, HOST } = fresh();
+      game.setState('menu');
+      for (let i = 0; i < 30; i++) { game.update(); game.render(); }
+      HOST.ctxStats.calls = 0;
+      const FR = 200;
+      for (let i = 0; i < FR; i++) { game.update(); game.render(); }
+      const perFrame = HOST.ctxStats.calls / FR;
+      ok(perFrame < 900,
+        `main menu costs ${Math.round(perFrame)} canvas calls/frame (was ~3232 pre-atlas)`);
+    },
   },
 };
